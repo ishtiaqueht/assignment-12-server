@@ -1,7 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const app = express();
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const port = process.env.PORT || 3000;
 require("dotenv").config();
 
@@ -24,6 +24,9 @@ async function run() {
 
     const db = client.db("eduPulseDB");
     const usersCollection = db.collection("users");
+    const sessionsCollection = db.collection("sessions");
+    // const reviewsCollection = db.collection("reviews");
+    // const bookedSessionsCollection = db.collection("bookedSessions");
 
     // 🔍 Search users by email
     app.get("/users/search", async (req, res) => {
@@ -31,74 +34,81 @@ async function run() {
       if (!emailQuery) {
         return res.status(400).send({ message: "Missing email query" });
       }
-
       const regex = new RegExp(emailQuery, "i");
-      try {
-        const users = await usersCollection
-          .find({ email: { $regex: regex } })
-          .limit(10)
-          .toArray();
-        res.send(users);
-      } catch (error) {
-        console.error("Error searching users", error);
-        res.status(500).send({ message: "Error searching users" });
-      }
+      const users = await usersCollection.find({ email: { $regex: regex } }).limit(10).toArray();
+      res.send(users);
     });
 
     // 👤 Get user role by email
     app.get("/users/:email/role", async (req, res) => {
-      try {
-        const email = req.params.email;
-        if (!email) {
-          return res.status(400).send({ message: "Email is required" });
-        }
-
-        const user = await usersCollection.findOne({ email });
-        if (!user) {
-          return res.status(404).send({ message: "User not found" });
-        }
-
-        res.send({ role: user.role || "user" });
-      } catch (error) {
-        console.error("Error getting user role:", error);
-        res.status(500).send({ message: "Failed to get role" });
-      }
+      const email = req.params.email;
+      const user = await usersCollection.findOne({ email });
+      if (!user) return res.status(404).send({ message: "User not found" });
+      res.send({ role: user.role || "user" });
     });
 
-    // ➕ Add new user (with name + photo)
+    // ➕ Add new user
     app.post("/users", async (req, res) => {
       const { email, name, photo } = req.body;
-
-      if (!email || !name || !photo) {
-        return res
-          .status(400)
-          .send({ message: "Email, Name and Photo are required" });
-      }
+      if (!email || !name || !photo) return res.status(400).send({ message: "All fields required" });
 
       const userExists = await usersCollection.findOne({ email });
-      if (userExists) {
-        return res
-          .status(200)
-          .send({ message: "User already exists", inserted: false });
-      }
+      if (userExists) return res.status(200).send({ message: "User already exists", inserted: false });
 
-      const newUser = {
-        email,
-        name,
-        photo,
-        role: "student", // default role
-        createdAt: new Date(),
-      };
-
+      const newUser = { email, name, photo, role: "student", createdAt: new Date() };
       const result = await usersCollection.insertOne(newUser);
       res.send(result);
     });
 
-    // ✅ DB connection check
+    // ✅ Get all sessions
+    app.get("/sessions", async (req, res) => {
+      const sessions = await sessionsCollection.find().toArray();
+      res.send(sessions);
+    });
+
+    // ✅ Get single session
+    app.get("/sessions/:id", async (req, res) => {
+      const id = req.params.id;
+      const session = await sessionsCollection.findOne({ _id: new ObjectId(id) });
+      res.send(session);
+    });
+
+    // ➕ Add session
+    app.post("/sessions", async (req, res) => {
+      const session = req.body;
+      const result = await sessionsCollection.insertOne(session);
+      res.send(result);
+    });
+
+    // // ✅ Get reviews by sessionId
+    // app.get("/sessions/:id/reviews", async (req, res) => {
+    //   const id = req.params.id;
+    //   const reviews = await reviewsCollection.find({ sessionId: id }).toArray();
+    //   res.send(reviews);
+    // });
+
+    // // ➕ Add review
+    // app.post("/reviews", async (req, res) => {
+    //   const review = req.body;
+    //   const result = await reviewsCollection.insertOne(review);
+    //   res.send(result);
+    // });
+
+    // // ✅ Book session (check duplicate)
+    // app.post("/bookedSessions", async (req, res) => {
+    //   const { studentEmail, sessionId } = req.body;
+    //   const exists = await bookedSessionsCollection.findOne({ studentEmail, sessionId });
+    //   if (exists) return res.status(400).send({ message: "Already booked" });
+
+    //   const result = await bookedSessionsCollection.insertOne(req.body);
+    //   res.send(result);
+    // });
+
+    // ✅ DB check
     await client.db("admin").command({ ping: 1 });
     console.log("✅ Connected to MongoDB");
   } finally {
-    // await client.close(); // keep connection open
+    // keep connection open
   }
 }
 run().catch(console.dir);
