@@ -246,19 +246,51 @@ async function run() {
     app.post("/sessions", async (req, res) => {
       try {
         const session = req.body;
-        if (!session.title || !session.tutorEmail) {
+
+        // Required fields check
+        if (!session.title || !session.tutorEmail || !session.tutorName) {
           return res.status(400).send({ message: "Missing required fields" });
         }
-        const result = await sessionsCollection.insertOne({
+
+        const newSession = {
           ...session,
+          registrationFee: 0, // default
+          status: "pending", // default
           createdAt: new Date(),
-        });
+        };
+
+        const result = await sessionsCollection.insertOne(newSession);
         res.send(result);
       } catch (err) {
         console.error("POST /sessions error:", err);
         res.status(500).send({ message: "Server error" });
       }
     });
+
+    // app.patch("/sessions/:id/status", async (req, res) => {
+    //   try {
+    //     const { id } = req.params;
+    //     const { status } = req.body;
+
+    //     if (!["pending", "approved", "rejected"].includes(status)) {
+    //       return res.status(400).send({ message: "Invalid status" });
+    //     }
+
+    //     const updated = await sessionsCollection.updateOne(
+    //       { _id: new ObjectId(id) },
+    //       { $set: { status, updatedAt: new Date() } }
+    //     );
+
+    //     if (updated.matchedCount === 0) {
+    //       return res.status(404).send({ message: "Session not found" });
+    //     }
+
+    //     res.send({ message: `Session status updated to ${status}` });
+    //   } catch (err) {
+    //     console.error("PATCH /sessions/:id/status error:", err);
+    //     res.status(500).send({ message: "Server error" });
+    //   }
+    // });
 
     // ------------------ REVIEWS ------------------
 
