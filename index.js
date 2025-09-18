@@ -25,7 +25,7 @@ async function run() {
     const db = client.db("eduPulseDB");
     const usersCollection = db.collection("users");
     const sessionsCollection = db.collection("sessions");
-    // const reviewsCollection = db.collection("reviews");
+    const reviewsCollection = db.collection("reviews");
     // const bookedSessionsCollection = db.collection("bookedSessions");
 
     // 🔍 Search users by email
@@ -80,12 +80,12 @@ async function run() {
       res.send(result);
     });
 
-    // // ✅ Get reviews by sessionId
-    // app.get("/sessions/:id/reviews", async (req, res) => {
-    //   const id = req.params.id;
-    //   const reviews = await reviewsCollection.find({ sessionId: id }).toArray();
-    //   res.send(reviews);
-    // });
+    // ✅ Get reviews by sessionId
+    app.get("/sessions/:id/reviews", async (req, res) => {
+      const id = req.params.id;
+      const reviews = await reviewsCollection.find({ sessionId: id }).toArray();
+      res.send(reviews);
+    });
 
     // // ➕ Add review
     // app.post("/reviews", async (req, res) => {
