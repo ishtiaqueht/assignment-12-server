@@ -34,6 +34,17 @@ async function run() {
 
     // ------------------ USERS ------------------
 
+    // Get all users
+    app.get("/users", async (req, res) => {
+      try {
+        const users = await usersCollection.find({}).toArray();
+        res.send(users);
+      } catch (err) {
+        console.error("GET /users error:", err);
+        res.status(500).send({ message: "Server error" });
+      }
+    });
+
     // Search users by email (partial)
     app.get("/users/search", async (req, res) => {
       try {
@@ -209,6 +220,39 @@ async function run() {
         res.send(updatedUser);
       } catch (err) {
         console.error("PATCH /users/:id/approve-tutor error:", err);
+        res.status(500).send({ message: "Server error" });
+      }
+    });
+    // Decline tutor request by user ID
+    app.delete("/users/:id/decline-tutor", async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        const result = await usersCollection.updateOne(
+          { _id: new ObjectId(id), pendingTutor: true },
+          {
+            $set: { role: "student" }, // student role e reset
+            $unset: {
+              pendingTutor: "",
+              pendingReason: "",
+              pendingRequestedAt: "",
+            },
+          }
+        );
+
+        if (result.matchedCount === 0) {
+          return res
+            .status(404)
+            .send({ message: "No pending request found for this user" });
+        }
+
+        const updatedUser = await usersCollection.findOne({
+          _id: new ObjectId(id),
+        });
+
+        res.send({ message: "Tutor request declined ❌", user: updatedUser });
+      } catch (err) {
+        console.error("DELETE /users/:id/decline-tutor error:", err);
         res.status(500).send({ message: "Server error" });
       }
     });
