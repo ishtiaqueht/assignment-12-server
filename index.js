@@ -270,6 +270,19 @@ async function run() {
       }
     });
 
+    // Get only approved sessions (for public page)
+    app.get("/sessions/approved", async (req, res) => {
+      try {
+        const sessions = await sessionsCollection
+          .find({ status: "approved" })
+          .toArray();
+        res.send(Array.isArray(sessions) ? sessions : []);
+      } catch (err) {
+        console.error("GET /sessions/approved error:", err);
+        res.status(500).send({ message: "Server error" });
+      }
+    });
+
     // Get single session
     app.get("/sessions/:id", async (req, res) => {
       try {
@@ -311,27 +324,154 @@ async function run() {
       }
     });
 
-    // app.patch("/sessions/:id/status", async (req, res) => {
+    app.patch("/sessions/:id/status", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { status } = req.body;
+
+        if (!["pending", "approved", "rejected"].includes(status)) {
+          return res.status(400).send({ message: "Invalid status" });
+        }
+
+        const updated = await sessionsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { status, updatedAt: new Date() } }
+        );
+
+        if (updated.matchedCount === 0) {
+          return res.status(404).send({ message: "Session not found" });
+        }
+
+        res.send({ message: `Session status updated to ${status}` });
+      } catch (err) {
+        console.error("PATCH /sessions/:id/status error:", err);
+        res.status(500).send({ message: "Server error" });
+      }
+    });
+
+    // Get sessions by tutor email
+    app.get("/sessions/tutor/:email", async (req, res) => {
+      try {
+        const { email } = req.params;
+        const sessions = await sessionsCollection
+          .find({ tutorEmail: email })
+          .toArray();
+        res.send(Array.isArray(sessions) ? sessions : []);
+      } catch (err) {
+        console.error("GET /sessions/tutor/:email error:", err);
+        res.status(500).send({ message: "Server error" });
+      }
+    });
+
+    // ------------------ EXTRA SESSION ADMIN API ------------------
+
+    // Admin approve a session
+    app.patch("/sessions/:id/approve", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { isPaid, fee } = req.body;
+
+        const result = await sessionsCollection.updateOne(
+          { _id: new ObjectId(id), status: "pending" },
+          {
+            $set: {
+              status: "approved",
+              registrationFee: isPaid ? Number(fee) : 0,
+              approvedAt: new Date(),
+            },
+          }
+        );
+
+        if (result.matchedCount === 0) {
+          return res
+            .status(404)
+            .send({ message: "Session not found or not pending" });
+        }
+
+        res.send({ success: true });
+      } catch (err) {
+        console.error("PATCH /sessions/:id/approve error:", err);
+        res.status(500).send({ message: "Server error" });
+      }
+    });
+
+    // Admin reject a session
+    app.patch("/sessions/:id/reject", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { reason, feedback } = req.body;
+
+        const result = await sessionsCollection.updateOne(
+          { _id: new ObjectId(id), status: "pending" },
+          {
+            $set: {
+              status: "rejected",
+              rejectionReason: reason,
+              rejectionFeedback: feedback,
+              rejectedAt: new Date(),
+            },
+          }
+        );
+
+        if (result.matchedCount === 0) {
+          return res
+            .status(404)
+            .send({ message: "Session not found or not pending" });
+        }
+
+        res.send({ success: true });
+      } catch (err) {
+        console.error("PATCH /sessions/:id/reject error:", err);
+        res.status(500).send({ message: "Server error" });
+      }
+    });
+
+    // // ------------------ MATERIALS ------------------
+
+    // // Tutor uploads material
+    // app.post("/materials", async (req, res) => {
+    //   try {
+    //     const material = {
+    //       ...req.body,
+    //       createdAt: new Date(),
+    //     };
+
+    //     const result = await materialsCollection.insertOne(material);
+    //     res.send(result);
+    //   } catch (err) {
+    //     console.error("POST /materials error:", err);
+    //     res.status(500).send({ message: "Server error" });
+    //   }
+    // });
+
+    // // Get all materials (tutor sees own, admin sees all)
+    // app.get("/materials", async (req, res) => {
+    //   try {
+    //     const { email, role } = req.query;
+    //     let filter = {};
+
+    //     if (role === "tutor" && email) {
+    //       filter.tutorEmail = email;
+    //     }
+
+    //     const materials = await materialsCollection.find(filter).toArray();
+    //     res.send(materials);
+    //   } catch (err) {
+    //     console.error("GET /materials error:", err);
+    //     res.status(500).send({ message: "Server error" });
+    //   }
+    // });
+
+    // // Delete material
+    // app.delete("/materials/:id", async (req, res) => {
     //   try {
     //     const { id } = req.params;
-    //     const { status } = req.body;
-
-    //     if (!["pending", "approved", "rejected"].includes(status)) {
-    //       return res.status(400).send({ message: "Invalid status" });
-    //     }
-
-    //     const updated = await sessionsCollection.updateOne(
-    //       { _id: new ObjectId(id) },
-    //       { $set: { status, updatedAt: new Date() } }
-    //     );
-
-    //     if (updated.matchedCount === 0) {
-    //       return res.status(404).send({ message: "Session not found" });
-    //     }
-
-    //     res.send({ message: `Session status updated to ${status}` });
+    //     const result = await materialsCollection.deleteOne({
+    //       _id: new ObjectId(id),
+    //     });
+    //     res.send(result);
     //   } catch (err) {
-    //     console.error("PATCH /sessions/:id/status error:", err);
+    //     console.error("DELETE /materials/:id error:", err);
     //     res.status(500).send({ message: "Server error" });
     //   }
     // });
