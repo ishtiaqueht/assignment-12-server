@@ -426,6 +426,45 @@ async function run() {
       }
     });
 
+    // Update session (only approved sessions)
+    app.patch("/sessions/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const { title } = req.body;
+
+        const result = await sessionsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: {
+              title,
+              updatedAt: new Date(),
+            },
+          }
+        );
+
+        res.send(result);
+      } catch (err) {
+        console.error("Update error:", err);
+        res.status(500).send({ message: "Failed to update session" });
+      }
+    });
+
+    // Delete session
+    app.delete("/sessions/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+
+        const result = await sessionsCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+
+        res.send(result);
+      } catch (err) {
+        console.error("Delete error:", err);
+        res.status(500).send({ message: "Failed to delete session" });
+      }
+    });
+
     // // ------------------ MATERIALS ------------------
 
     // // Tutor uploads material
