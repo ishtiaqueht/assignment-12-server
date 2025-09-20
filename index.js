@@ -29,15 +29,28 @@ async function run() {
     const db = client.db("eduPulseDB");
     const usersCollection = db.collection("users");
     const sessionsCollection = db.collection("sessions");
+    const materialsCollection = db.collection("materials");
     const reviewsCollection = db.collection("reviews");
     const bookedSessionsCollection = db.collection("bookedSessions");
 
     // ------------------ USERS ------------------
 
-    // Get all users
+    // Get all users with optional search (by name or email)
     app.get("/users", async (req, res) => {
       try {
-        const users = await usersCollection.find({}).toArray();
+        const search = req.query.search || "";
+
+        let query = {};
+        if (search) {
+          query = {
+            $or: [
+              { name: { $regex: search, $options: "i" } }, // case-insensitive
+              { email: { $regex: search, $options: "i" } },
+            ],
+          };
+        }
+
+        const users = await usersCollection.find(query).toArray();
         res.send(users);
       } catch (err) {
         console.error("GET /users error:", err);
@@ -259,10 +272,30 @@ async function run() {
 
     // ------------------ SESSIONS ------------------
 
-    // Get all sessions
+    // // Get all sessions
+    // app.get("/sessions", async (req, res) => {
+    //   try {
+    //     const sessions = await sessionsCollection.find().toArray();
+    //     res.send(Array.isArray(sessions) ? sessions : []);
+    //   } catch (err) {
+    //     console.error("GET /sessions error:", err);
+    //     res.status(500).send({ message: "Server error" });
+    //   }
+    // });
+
+    // Get all sessions with optional filters
     app.get("/sessions", async (req, res) => {
       try {
-        const sessions = await sessionsCollection.find().toArray();
+        const { status, tutorEmail } = req.query;
+        let filter = {};
+
+        // Filter by status if provided
+        if (status) filter.status = status;
+
+        // Filter by tutorEmail if provided
+        if (tutorEmail) filter.tutorEmail = tutorEmail;
+
+        const sessions = await sessionsCollection.find(filter).toArray();
         res.send(Array.isArray(sessions) ? sessions : []);
       } catch (err) {
         console.error("GET /sessions error:", err);
@@ -465,55 +498,107 @@ async function run() {
       }
     });
 
-    // // ------------------ MATERIALS ------------------
+    // ------------------ MATERIALS ------------------
 
-    // // Tutor uploads material
-    // app.post("/materials", async (req, res) => {
-    //   try {
-    //     const material = {
-    //       ...req.body,
-    //       createdAt: new Date(),
-    //     };
+    // Tutor uploads material
+    app.post("/materials", async (req, res) => {
+      try {
+        const material = {
+          ...req.body,
+          createdAt: new Date(),
+        };
 
-    //     const result = await materialsCollection.insertOne(material);
-    //     res.send(result);
-    //   } catch (err) {
-    //     console.error("POST /materials error:", err);
-    //     res.status(500).send({ message: "Server error" });
-    //   }
-    // });
+        const result = await materialsCollection.insertOne(material);
+        res.send(result);
+      } catch (err) {
+        console.error("POST /materials error:", err);
+        res.status(500).send({ message: "Server error" });
+      }
+    });
 
-    // // Get all materials (tutor sees own, admin sees all)
-    // app.get("/materials", async (req, res) => {
-    //   try {
-    //     const { email, role } = req.query;
-    //     let filter = {};
+    // Get all materials (tutor sees own, admin sees all)
+    app.get("/materials", async (req, res) => {
+      try {
+        const { email, role } = req.query;
+        let filter = {};
 
-    //     if (role === "tutor" && email) {
-    //       filter.tutorEmail = email;
-    //     }
+        if (role === "tutor" && email) {
+          filter.tutorEmail = email;
+        }
 
-    //     const materials = await materialsCollection.find(filter).toArray();
-    //     res.send(materials);
-    //   } catch (err) {
-    //     console.error("GET /materials error:", err);
-    //     res.status(500).send({ message: "Server error" });
-    //   }
-    // });
+        const materials = await materialsCollection.find(filter).toArray();
+        res.send(materials);
+      } catch (err) {
+        console.error("GET /materials error:", err);
+        res.status(500).send({ message: "Server error" });
+      }
+    });
+    // Update a material
+    app.put("/materials/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const updatedData = req.body;
 
-    // // Delete material
-    // app.delete("/materials/:id", async (req, res) => {
-    //   try {
-    //     const { id } = req.params;
-    //     const result = await materialsCollection.deleteOne({
-    //       _id: new ObjectId(id),
-    //     });
-    //     res.send(result);
-    //   } catch (err) {
-    //     console.error("DELETE /materials/:id error:", err);
-    //     res.status(500).send({ message: "Server error" });
-    //   }
-    // });
+        // Convert id to ObjectId
+        const result = await materialsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: updatedData }
+        );
+
+        if (result.matchedCount === 0) {
+          return res.status(404).send({ message: "Material not found" });
+        }
+
+        res.send({
+          message: "Material updated ✅",
+          modifiedCount: result.modifiedCount,
+        });
+      } catch (err) {
+        console.error("PUT /materials/:id error:", err);
+        res.status(500).send({ message: "Server error" });
+      }
+    });
+    // Update a material
+    app.put("/materials/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const updatedData = { ...req.body };
+
+        // Remove _id if present
+        delete updatedData._id;
+
+        const result = await materialsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: updatedData }
+        );
+
+        if (result.matchedCount === 0) {
+          return res.status(404).send({ message: "Material not found" });
+        }
+
+        res.send({
+          message: "Material updated ✅",
+          modifiedCount: result.modifiedCount,
+        });
+      } catch (err) {
+        console.error("PUT /materials/:id error:", err);
+        res.status(500).send({ message: "Server error" });
+      }
+    });
+
+    // Delete material
+    app.delete("/materials/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const result = await materialsCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+        res.send(result);
+      } catch (err) {
+        console.error("DELETE /materials/:id error:", err);
+        res.status(500).send({ message: "Server error" });
+      }
+    });
 
     // ------------------ REVIEWS ------------------
 
