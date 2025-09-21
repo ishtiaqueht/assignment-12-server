@@ -318,19 +318,48 @@ async function run() {
 
     // Get single session
     app.get("/sessions/:id", async (req, res) => {
-      try {
-        const id = req.params.id;
-        const session = await sessionsCollection.findOne({
-          _id: new ObjectId(id),
-        });
-        if (!session)
-          return res.status(404).send({ message: "Session not found" });
-        res.send(session);
-      } catch (err) {
-        console.error("GET /sessions/:id error:", err);
-        res.status(400).send({ message: "Invalid session ID" });
+  try {
+    const { id } = req.params;
+
+    // Validate ObjectId
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({ message: "Invalid session ID" });
+    }
+
+    const session = await sessionsCollection.findOne(
+      { _id: new ObjectId(id) },
+      {
+        projection: {
+          title: 1,
+          description: 1,
+          registrationStart: 1,
+          registrationEnd: 1,
+          classStart: 1,
+          classEnd: 1,
+          duration: 1,
+          tutorName: 1,
+          tutorEmail: 1,
+          registrationFee: 1,
+          status: 1,
+          createdAt: 1,
+          approvedAt: 1,
+          updatedAt: 1,
+          averageRating: 1, // ✅ include averageRating
+        },
       }
-    });
+    );
+
+    if (!session) {
+      return res.status(404).send({ message: "Session not found" });
+    }
+
+    res.send(session);
+  } catch (err) {
+    console.error("GET /sessions/:id error:", err);
+    res.status(500).send({ message: "Server error" });
+  }
+});
+
 
     // Add new session
     app.post("/sessions", async (req, res) => {
@@ -357,25 +386,42 @@ async function run() {
       }
     });
 
+    // ✅ Update session status (approve/reject/pending)
     app.patch("/sessions/:id/status", async (req, res) => {
       try {
         const { id } = req.params;
-        const { status } = req.body;
+        const { status, rejectionReason, feedback } = req.body;
 
         if (!["pending", "approved", "rejected"].includes(status)) {
           return res.status(400).send({ message: "Invalid status" });
         }
 
-        const updated = await sessionsCollection.updateOne(
+        const updateFields = {
+          status,
+          updatedAt: new Date(),
+        };
+
+        if (status === "rejected") {
+          updateFields.rejectionReason =
+            rejectionReason || "No reason provided";
+          updateFields.feedback = feedback || "";
+        }
+
+        if (status === "pending") {
+          updateFields.rejectionReason = null;
+          updateFields.feedback = null;
+        }
+
+        const result = await sessionsCollection.updateOne(
           { _id: new ObjectId(id) },
-          { $set: { status, updatedAt: new Date() } }
+          { $set: updateFields }
         );
 
-        if (updated.matchedCount === 0) {
+        if (result.matchedCount === 0) {
           return res.status(404).send({ message: "Session not found" });
         }
 
-        res.send({ message: `Session status updated to ${status}` });
+        res.send({ message: `Session updated to ${status}` });
       } catch (err) {
         console.error("PATCH /sessions/:id/status error:", err);
         res.status(500).send({ message: "Server error" });
@@ -458,24 +504,32 @@ async function run() {
         res.status(500).send({ message: "Server error" });
       }
     });
-
-    // Update session (only approved sessions)
+    // Update session (re-submit rejected -> pending)
     app.patch("/sessions/:id", async (req, res) => {
       try {
-        const id = req.params.id;
-        const { title } = req.body;
+        const { id } = req.params;
+        const { status } = req.body;
 
         const result = await sessionsCollection.updateOne(
           { _id: new ObjectId(id) },
           {
             $set: {
-              title,
+              ...(status && { status }), // only update if status passed
               updatedAt: new Date(),
+              rejectionReason: null, // reset rejection data
+              feedback: null,
             },
           }
         );
 
-        res.send(result);
+        if (result.matchedCount === 0) {
+          return res.status(404).send({ message: "Session not found" });
+        }
+
+        res.send({
+          message: "Session updated ✅",
+          modifiedCount: result.modifiedCount,
+        });
       } catch (err) {
         console.error("Update error:", err);
         res.status(500).send({ message: "Failed to update session" });
@@ -558,14 +612,19 @@ async function run() {
         res.status(500).send({ message: "Server error" });
       }
     });
-    // Update a material
+    // ✅ Update a material
     app.put("/materials/:id", async (req, res) => {
       try {
         const { id } = req.params;
-        const updatedData = { ...req.body };
 
-        // Remove _id if present
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).send({ message: "Invalid material ID" });
+        }
+
+        const updatedData = { ...req.body };
         delete updatedData._id;
+
+        console.log("Updating material:", id, updatedData); // Debug log
 
         const result = await materialsCollection.updateOne(
           { _id: new ObjectId(id) },
@@ -616,25 +675,38 @@ async function run() {
       }
     });
 
-    // Add review
-    app.post("/reviews", async (req, res) => {
-      try {
-        const review = req.body;
-        if (!review.sessionId || !review.studentEmail) {
-          return res
-            .status(400)
-            .send({ message: "Missing sessionId or studentEmail" });
-        }
-        const result = await reviewsCollection.insertOne({
-          ...review,
-          createdAt: new Date(),
-        });
-        res.send(result);
-      } catch (err) {
-        console.error("POST /reviews error:", err);
-        res.status(500).send({ message: "Server error" });
-      }
-    });
+    // ✅ Add review
+app.post("/reviews", async (req, res) => {
+  try {
+    const newReview = req.body;
+
+    // ✅ Ensure rating is a number
+    newReview.rating = Number(newReview.rating);
+
+    // Insert the new review
+    const result = await reviewsCollection.insertOne(newReview);
+
+    // Recalculate average rating for the session
+    const allReviews = await reviewsCollection
+      .find({ sessionId: newReview.sessionId })
+      .toArray();
+
+    const avgRating =
+      allReviews.reduce((sum, r) => sum + r.rating, 0) / allReviews.length;
+
+    // Update sessions collection with numeric average rating
+    await sessionsCollection.updateOne(
+      { _id: new ObjectId(newReview.sessionId) },
+      { $set: { averageRating: parseFloat(avgRating.toFixed(1)) } }
+    );
+
+    res.send(result);
+  } catch (err) {
+    console.error("POST /reviews error:", err);
+    res.status(500).send({ message: "Server error" });
+  }
+});
+
 
     // ------------------ BOOKED SESSIONS ------------------
 
@@ -670,6 +742,21 @@ async function run() {
       try {
         const booked = await bookedSessionsCollection.find().toArray();
         res.send(Array.isArray(booked) ? booked : []);
+      } catch (err) {
+        console.error("GET /bookedSessions error:", err);
+        res.status(500).send({ message: "Server error" });
+      }
+    });
+
+    // ✅ Check if a student has already booked a session
+    app.get("/bookedSessions/:sessionId/:studentEmail", async (req, res) => {
+      try {
+        const { sessionId, studentEmail } = req.params;
+        const booking = await bookedSessionsCollection.findOne({
+          sessionId,
+          studentEmail,
+        });
+        res.send({ booked: !!booking });
       } catch (err) {
         console.error("GET /bookedSessions error:", err);
         res.status(500).send({ message: "Server error" });
