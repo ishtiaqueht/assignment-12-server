@@ -32,6 +32,7 @@ async function run() {
     const materialsCollection = db.collection("materials");
     const reviewsCollection = db.collection("reviews");
     const bookedSessionsCollection = db.collection("bookedSessions");
+    const notesCollection = db.collection("notes");
 
     // ------------------ USERS ------------------
 
@@ -587,6 +588,20 @@ async function run() {
         res.status(500).send({ message: "Server error" });
       }
     });
+    // ✅ Get materials by sessionId (student use)
+app.get("/materials/:sessionId", async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const materials = await materialsCollection
+      .find({ studySessionId: sessionId })
+      .toArray();
+    res.send(materials);
+  } catch (err) {
+    console.error("GET /materials/:sessionId error:", err);
+    res.status(500).send({ message: "Server error" });
+  }
+});
+
     // Update a material
     app.put("/materials/:id", async (req, res) => {
       try {
@@ -737,16 +752,24 @@ app.post("/reviews", async (req, res) => {
       }
     });
 
-    // Get all booked sessions (optional)
-    app.get("/bookedSessions", async (req, res) => {
-      try {
-        const booked = await bookedSessionsCollection.find().toArray();
-        res.send(Array.isArray(booked) ? booked : []);
-      } catch (err) {
-        console.error("GET /bookedSessions error:", err);
-        res.status(500).send({ message: "Server error" });
-      }
-    });
+   // ✅ Get booked sessions for a specific student
+app.get("/bookedSessions", async (req, res) => {
+  try {
+    const { email } = req.query;
+    let filter = {};
+
+    if (email) {
+      filter.studentEmail = email;
+    }
+
+    const booked = await bookedSessionsCollection.find(filter).toArray();
+    res.send(Array.isArray(booked) ? booked : []);
+  } catch (err) {
+    console.error("GET /bookedSessions error:", err);
+    res.status(500).send({ message: "Server error" });
+  }
+});
+
 
     // ✅ Check if a student has already booked a session
     app.get("/bookedSessions/:sessionId/:studentEmail", async (req, res) => {
@@ -762,6 +785,97 @@ app.post("/reviews", async (req, res) => {
         res.status(500).send({ message: "Server error" });
       }
     });
+    // ------------------ NOTE ------------------
+
+    // Create a note
+app.post("/notes", async (req, res) => {
+  try {
+    const note = {
+      ...req.body,
+      createdAt: new Date(),
+    };
+
+    const result = await notesCollection.insertOne(note);
+    res.send({
+      message: "Note created ✅",
+      insertedId: result.insertedId,
+    });
+  } catch (err) {
+    console.error("POST /notes error:", err);
+    res.status(500).send({ message: "Server error" });
+  }
+});
+
+// Get all notes for a student
+app.get("/notes", async (req, res) => {
+  try {
+    const { email } = req.query;
+    if (!email) {
+      return res.status(400).send({ message: "Email is required" });
+    }
+
+    const notes = await notesCollection
+      .find({ email })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.send(notes);
+  } catch (err) {
+    console.error("GET /notes error:", err);
+    res.status(500).send({ message: "Server error" });
+  }
+});
+
+// Update a note
+app.put("/notes/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({ message: "Invalid note ID" });
+    }
+
+    const updatedData = { ...req.body };
+    delete updatedData._id;
+
+    const result = await notesCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updatedData }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).send({ message: "Note not found" });
+    }
+
+    res.send({
+      message: "Note updated ✅",
+      modifiedCount: result.modifiedCount,
+    });
+  } catch (err) {
+    console.error("PUT /notes/:id error:", err);
+    res.status(500).send({ message: "Server error" });
+  }
+});
+
+// Delete a note
+app.delete("/notes/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({ message: "Invalid note ID" });
+    }
+
+    const result = await notesCollection.deleteOne({ _id: new ObjectId(id) });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).send({ message: "Note not found" });
+    }
+
+    res.send({ message: "Note deleted ✅" });
+  } catch (err) {
+    console.error("DELETE /notes/:id error:", err);
+    res.status(500).send({ message: "Server error" });
+  }
+});
 
     // DB ping
     await client.db("admin").command({ ping: 1 });
