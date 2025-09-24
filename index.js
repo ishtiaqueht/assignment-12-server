@@ -35,8 +35,6 @@ const client = new MongoClient(uri, {
 
 async function run() {
   try {
-    await client.connect();
-
     const db = client.db("eduPulseDB");
     const usersCollection = db.collection("users");
     const sessionsCollection = db.collection("sessions");
@@ -926,9 +924,6 @@ app.delete("/notes/:id", async (req, res) => {
   }
 });
 
-    // DB ping
-    await client.db("admin").command({ ping: 1 });
-    console.log("✅ Connected to MongoDB");
   } finally {
     // keep connection open
   }
