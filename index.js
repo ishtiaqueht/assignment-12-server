@@ -2,10 +2,21 @@
 const express = require("express");
 const cors = require("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+const { default: Stripe } = require("stripe");
 require("dotenv").config();
+const admin = require("firebase-admin");
 
 const app = express();
 const port = process.env.PORT || 3000;
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
+const decodedKey = Buffer.from(process.env.FB_SERVICE_KEY, 'base64').toString('utf8');
+const serviceAccount = JSON.parse(decodedKey);
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+
 
 // Middlewares
 app.use(cors());
@@ -34,6 +45,28 @@ async function run() {
     const bookedSessionsCollection = db.collection("bookedSessions");
     const notesCollection = db.collection("notes");
 
+
+const verifyFBToken = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).send({ message: "Unauthorized access" });
+    }
+
+    const token = authHeader.split(" ")[1];
+
+    // Verify the token with Firebase Admin SDK
+    const decoded = await admin.auth().verifyIdToken(token);
+    req.decoded = decoded; 
+
+    next();
+  } catch (error) {
+    console.error("Firebase token verification error:", error);
+    return res.status(403).send({ message: "Forbidden access" });
+  }
+};
+
     // ------------------ USERS ------------------
 
     // Get all users with optional search (by name or email)
@@ -60,7 +93,7 @@ async function run() {
     });
 
     // Search users by email (partial)
-    app.get("/users/search", async (req, res) => {
+    app.get("/users/search",verifyFBToken, async (req, res) => {
       try {
         const emailQuery = req.query.email || "";
         const regex = new RegExp(emailQuery, "i");
@@ -76,7 +109,7 @@ async function run() {
     });
 
     // Get role by email
-    app.get("/users/:email/role", async (req, res) => {
+    app.get("/users/:email/role",verifyFBToken, async (req, res) => {
       try {
         const email = req.params.email;
         const user = await usersCollection.findOne({ email });
@@ -187,7 +220,7 @@ async function run() {
     });
 
     // Get all users with pendingTutor flag
-    app.get("/users/pending-tutors", async (req, res) => {
+    app.get("/users/pending-tutors",verifyFBToken, async (req, res) => {
       try {
         const pending = await usersCollection
           .find({ pendingTutor: true })
@@ -273,19 +306,8 @@ async function run() {
 
     // ------------------ SESSIONS ------------------
 
-    // // Get all sessions
-    // app.get("/sessions", async (req, res) => {
-    //   try {
-    //     const sessions = await sessionsCollection.find().toArray();
-    //     res.send(Array.isArray(sessions) ? sessions : []);
-    //   } catch (err) {
-    //     console.error("GET /sessions error:", err);
-    //     res.status(500).send({ message: "Server error" });
-    //   }
-    // });
-
     // Get all sessions with optional filters
-    app.get("/sessions", async (req, res) => {
+    app.get("/sessions",verifyFBToken, async (req, res) => {
       try {
         const { status, tutorEmail } = req.query;
         let filter = {};
@@ -318,7 +340,7 @@ async function run() {
     });
 
     // Get single session
-    app.get("/sessions/:id", async (req, res) => {
+    app.get("/sessions/:id",verifyFBToken, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -430,7 +452,7 @@ async function run() {
     });
 
     // Get sessions by tutor email
-    app.get("/sessions/tutor/:email", async (req, res) => {
+    app.get("/sessions/tutor/:email",verifyFBToken, async (req, res) => {
       try {
         const { email } = req.params;
         const sessions = await sessionsCollection
@@ -572,7 +594,7 @@ async function run() {
     });
 
     // Get all materials (tutor sees own, admin sees all)
-    app.get("/materials", async (req, res) => {
+    app.get("/materials",verifyFBToken, async (req, res) => {
       try {
         const { email, role } = req.query;
         let filter = {};
@@ -589,7 +611,7 @@ async function run() {
       }
     });
     // ✅ Get materials by sessionId (student use)
-app.get("/materials/:sessionId", async (req, res) => {
+app.get("/materials/:sessionId",verifyFBToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
     const materials = await materialsCollection
@@ -722,6 +744,33 @@ app.post("/reviews", async (req, res) => {
   }
 });
 
+     // ------------------ PAYMENT ------------------
+
+// ✅ Create PaymentIntent
+app.post("/create-payment-intent", async (req, res) => {
+  try {
+    const { price } = req.body; // frontend will send price in USD
+
+    if (!price || price <= 0) {
+      return res.status(400).send({ message: "Invalid price" });
+    }
+
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: price * 100, // convert to cents
+      currency: "usd",
+      payment_method_types: ["card"],
+    });
+
+    res.send({
+      clientSecret: paymentIntent.client_secret,
+    });
+  } catch (err) {
+    console.error("Payment error:", err);
+    res.status(500).send({ message: "Payment failed" });
+  }
+});
+
+
 
     // ------------------ BOOKED SESSIONS ------------------
 
@@ -753,7 +802,7 @@ app.post("/reviews", async (req, res) => {
     });
 
    // ✅ Get booked sessions for a specific student
-app.get("/bookedSessions", async (req, res) => {
+app.get("/bookedSessions",verifyFBToken, async (req, res) => {
   try {
     const { email } = req.query;
     let filter = {};
@@ -772,7 +821,7 @@ app.get("/bookedSessions", async (req, res) => {
 
 
     // ✅ Check if a student has already booked a session
-    app.get("/bookedSessions/:sessionId/:studentEmail", async (req, res) => {
+    app.get("/bookedSessions/:sessionId/:studentEmail",verifyFBToken, async (req, res) => {
       try {
         const { sessionId, studentEmail } = req.params;
         const booking = await bookedSessionsCollection.findOne({
@@ -807,7 +856,7 @@ app.post("/notes", async (req, res) => {
 });
 
 // Get all notes for a student
-app.get("/notes", async (req, res) => {
+app.get("/notes",verifyFBToken, async (req, res) => {
   try {
     const { email } = req.query;
     if (!email) {
